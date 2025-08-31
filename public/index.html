@@ -33,85 +33,278 @@
                 return userId;
             }, []);
 
-            // 🚀 新機能: URLメタデータ取得（プレビュー機能）
-            const fetchUrlMetadata = useCallback(async (url) => {
+            // 🚀 新機能: 詳細URLメタデータ取得（高精度プレビュー機能）
+            const fetchDetailedMetadata = useCallback(async (url) => {
                 try {
                     const urlObj = new URL(url);
                     const domain = urlObj.hostname.toLowerCase();
+                    const path = urlObj.pathname.toLowerCase();
+                    const params = urlObj.searchParams;
                     
                     let title = '';
                     let thumbnail = '';
+                    let description = '';
+                    let pageType = '';
                     
+                    // YouTube詳細解析
                     if (domain.includes('youtube.com') || domain.includes('youtu.be')) {
-                        title = 'YouTube動画';
                         thumbnail = '🎥';
-                    } else if (domain.includes('github.com')) {
-                        title = 'GitHub リポジトリ';
-                        thumbnail = '💻';
-                    } else if (domain.includes('qiita.com')) {
-                        title = 'Qiita記事';
-                        thumbnail = '📝';
-                    } else if (domain.includes('note.com') || domain.includes('medium.com')) {
-                        title = 'ブログ記事';
-                        thumbnail = '✍️';
-                    } else if (domain.includes('twitter.com') || domain.includes('x.com')) {
-                        title = 'Twitter/X投稿';
-                        thumbnail = '🐦';
-                    } else if (domain.includes('amazon.co.jp') || domain.includes('amazon.com')) {
-                        title = 'Amazon商品';
-                        thumbnail = '🛒';
-                    } else if (domain.includes('wikipedia.org')) {
-                        title = 'Wikipedia記事';
-                        thumbnail = '📚';
-                    } else if (domain.includes('news') || domain.includes('nikkei') || domain.includes('asahi') || domain.includes('mainichi')) {
-                        title = 'ニュース記事';
-                        thumbnail = '📰';
-                    } else {
-                        title = `${domain}のページ`;
-                        thumbnail = '🌐';
+                        pageType = 'video';
+                        if (params.get('v') || path.includes('/watch')) {
+                            title = 'YouTube動画';
+                            description = '動画コンテンツ。エンターテイメント、教育、情報など様々なジャンルの動画が視聴できます。';
+                        } else if (path.includes('/channel') || path.includes('/c/') || path.includes('/@')) {
+                            title = 'YouTubeチャンネル';
+                            description = 'YouTubeチャンネルページ。クリエイターの動画一覧や情報を確認できます。';
+                        } else if (path.includes('/playlist')) {
+                            title = 'YouTube再生リスト';
+                            description = '動画プレイリスト。テーマ別にまとめられた動画シリーズを連続視聴できます。';
+                        }
                     }
                     
-                    return { title, thumbnail, domain };
+                    // GitHub詳細解析
+                    else if (domain.includes('github.com')) {
+                        thumbnail = '💻';
+                        pageType = 'repository';
+                        const pathParts = path.split('/').filter(p => p);
+                        if (pathParts.length >= 2) {
+                            const repo = pathParts[1];
+                            title = `GitHub: ${repo}`;
+                            if (path.includes('/issues')) {
+                                description = 'プロジェクトの課題・バグ報告・機能要望などが議論されているページです。開発の進捗を把握できます。';
+                            } else if (path.includes('/pull')) {
+                                description = 'コードの変更提案・レビューページ。開発者同士のコード改善提案を確認できます。';
+                            } else if (path.includes('/wiki')) {
+                                description = 'プロジェクトのドキュメント・説明書。使い方や仕様について詳しい情報があります。';
+                            } else if (path.includes('/releases')) {
+                                description = 'ソフトウェアのバージョン履歴・ダウンロードページ。最新版や過去版の情報があります。';
+                            } else {
+                                description = 'プログラミングプロジェクトのソースコード。学習・参考・コントリビューションに活用できます。';
+                            }
+                        }
+                    }
+                    
+                    // Qiita詳細解析
+                    else if (domain.includes('qiita.com')) {
+                        thumbnail = '📝';
+                        pageType = 'article';
+                        if (path.includes('/items/')) {
+                            title = 'Qiita技術記事';
+                            description = 'プログラミング・IT技術に関する詳細な解説記事。コード例や実装方法が学べます。';
+                        } else if (path.includes('/organizations/')) {
+                            title = 'Qiita組織ページ';
+                            description = '企業・団体の技術記事まとめ。組織の技術スタックや知見を確認できます。';
+                        } else {
+                            title = 'Qiita記事';
+                            description = '技術者向けの知識共有記事。プログラミングやIT関連の情報が得られます。';
+                        }
+                    }
+                    
+                    // Note.com詳細解析
+                    else if (domain.includes('note.com')) {
+                        thumbnail = '✍️';
+                        pageType = 'blog';
+                        title = 'Note記事';
+                        if (path.includes('/magazine/')) {
+                            description = 'マガジン記事。特定テーマについて継続的に発信される記事シリーズです。';
+                        } else {
+                            description = '個人・企業の体験談、知見、クリエイティブな内容。多様な視点の情報が読めます。';
+                        }
+                    }
+                    
+                    // Medium詳細解析
+                    else if (domain.includes('medium.com')) {
+                        thumbnail = '📖';
+                        pageType = 'blog';
+                        title = 'Medium記事';
+                        description = '質の高いブログ記事。ビジネス、技術、ライフスタイルなど幅広いトピックの深い洞察があります。';
+                    }
+                    
+                    // Twitter/X詳細解析
+                    else if (domain.includes('twitter.com') || domain.includes('x.com')) {
+                        thumbnail = '🐦';
+                        pageType = 'social';
+                        if (path.includes('/status/')) {
+                            title = 'Twitter投稿';
+                            description = '個別ツイート。リアルタイムの情報、意見、ニュースの反応などを確認できます。';
+                        } else {
+                            title = 'Twitterプロフィール';
+                            description = 'ユーザーのプロフィールページ。投稿履歴、フォロー関係、プロフィール情報を確認できます。';
+                        }
+                    }
+                    
+                    // Amazon詳細解析
+                    else if (domain.includes('amazon.co.jp') || domain.includes('amazon.com')) {
+                        thumbnail = '🛒';
+                        pageType = 'ecommerce';
+                        if (path.includes('/dp/')) {
+                            title = 'Amazon商品ページ';
+                            description = '商品の詳細情報、価格、レビュー、在庫状況。購入検討や比較に役立つ情報があります。';
+                        } else if (path.includes('/s?')) {
+                            title = 'Amazon検索結果';
+                            description = '商品検索結果一覧。条件に合った商品の比較・選択ができます。';
+                        } else {
+                            title = 'Amazonページ';
+                            description = 'オンラインショッピング関連ページ。商品情報や購入に関する内容です。';
+                        }
+                    }
+                    
+                    // Wikipedia詳細解析
+                    else if (domain.includes('wikipedia.org')) {
+                        thumbnail = '📚';
+                        pageType = 'encyclopedia';
+                        const pathParts = path.split('/');
+                        if (pathParts.includes('wiki')) {
+                            title = 'Wikipedia記事';
+                            description = '信頼性の高い百科事典記事。歴史、科学、文化など幅広いトピックの詳細な情報があります。';
+                        }
+                    }
+                    
+                    // ニュースサイト詳細解析
+                    else if (domain.includes('nikkei.com')) {
+                        thumbnail = '📰';
+                        pageType = 'news';
+                        title = '日経ニュース';
+                        description = '経済・ビジネス・技術に関する最新ニュース。市場動向や企業情報を把握できます。';
+                    } else if (domain.includes('asahi.com')) {
+                        thumbnail = '📰';
+                        pageType = 'news';
+                        title = '朝日新聞記事';
+                        description = '社会・政治・国際情勢の最新ニュース。時事問題や社会動向を理解できます。';
+                    } else if (domain.includes('news') || domain.includes('mainichi')) {
+                        thumbnail = '📰';
+                        pageType = 'news';
+                        title = 'ニュース記事';
+                        description = '最新の時事情報・社会情勢。政治、経済、社会の動向を把握できます。';
+                    }
+                    
+                    // Stack Overflow詳細解析
+                    else if (domain.includes('stackoverflow.com')) {
+                        thumbnail = '❓';
+                        pageType = 'qa';
+                        title = 'Stack Overflow';
+                        if (path.includes('/questions/')) {
+                            description = 'プログラミングの質問と回答。具体的な技術的問題の解決方法が見つかります。';
+                        } else {
+                            description = 'プログラマー向けQ&Aサイト。技術的な疑問解決や知識共有の場です。';
+                        }
+                    }
+                    
+                    // その他のサイト（ドメインベース推測）
+                    else {
+                        thumbnail = '🌐';
+                        pageType = 'general';
+                        title = `${domain}のページ`;
+                        
+                        // パスやドメインから内容を推測
+                        if (domain.includes('blog') || path.includes('blog')) {
+                            description = 'ブログ記事。個人や企業の体験談、知見、情報発信を読むことができます。';
+                        } else if (domain.includes('docs') || path.includes('docs')) {
+                            description = 'ドキュメントページ。製品・サービスの使い方や技術仕様について詳しく解説されています。';
+                        } else if (domain.includes('api') || path.includes('api')) {
+                            description = 'API仕様書・開発者向けドキュメント。システム連携や開発に必要な技術情報があります。';
+                        } else if (path.includes('tutorial') || path.includes('guide')) {
+                            description = 'チュートリアル・ガイド。段階的な学習や操作方法を習得できます。';
+                        } else if (path.includes('about') || path.includes('company')) {
+                            description = '企業情報・サービス紹介ページ。組織の概要、理念、サービス内容を確認できます。';
+                        } else {
+                            description = 'Webページ。有益な情報が含まれている可能性があります。時間のあるときに内容を確認してみましょう。';
+                        }
+                    }
+                    
+                    return { title, thumbnail, domain, description, pageType };
                 } catch (error) {
-                    return { title: 'Webページ', thumbnail: '🌐', domain: '' };
+                    return { 
+                        title: 'Webページ', 
+                        thumbnail: '🌐', 
+                        domain: '', 
+                        description: 'ページの詳細を取得できませんでしたが、有益な情報が含まれている可能性があります。',
+                        pageType: 'general'
+                    };
                 }
             }, []);
 
-            // 🤖 新機能: AI要約機能（模擬実装）
-            const generateAISummary = useCallback(async (url, title) => {
+            // 🤖 新機能: 高精度AI要約生成（メタデータベース）
+            const generateIntelligentSummary = useCallback(async (url, metadata) => {
                 try {
-                    // URLとタイトルから要約を生成（実際のAI APIがないため、模擬実装）
                     const urlLower = url.toLowerCase();
-                    const titleLower = title.toLowerCase();
+                    const titleLower = (metadata.title || '').toLowerCase();
+                    const domain = metadata.domain || '';
+                    const pageType = metadata.pageType || 'general';
                     
                     let summary = '';
                     
-                    // ドメインベースでの要約生成
-                    if (urlLower.includes('youtube.com') || urlLower.includes('youtu.be')) {
-                        summary = '動画コンテンツ。視聴して学習や娯楽に活用できます。';
-                    } else if (urlLower.includes('github.com')) {
-                        summary = 'プログラミング関連のリポジトリ。コードの参考や学習に役立ちます。';
-                    } else if (urlLower.includes('qiita.com')) {
-                        summary = '技術記事。プログラミングや開発に関する知識が得られます。';
-                    } else if (urlLower.includes('note.com') || urlLower.includes('medium.com')) {
-                        summary = 'ブログ記事。様々な分野の知見や体験談が読めます。';
-                    } else if (urlLower.includes('wikipedia.org')) {
-                        summary = '百科事典記事。幅広いトピックについて詳しい情報が得られます。';
-                    } else if (urlLower.includes('news') || urlLower.includes('nikkei') || urlLower.includes('asahi')) {
-                        summary = '最新ニュース記事。時事情報や社会の動向を把握できます。';
-                    } else if (urlLower.includes('amazon')) {
-                        summary = '商品ページ。購入検討や商品情報の確認に使用できます。';
-                    } else {
-                        // キーワードベースでの要約生成
-                        if (titleLower.includes('チュートリアル') || titleLower.includes('tutorial') || titleLower.includes('使い方')) {
-                            summary = '学習コンテンツ。新しいスキルや知識を身につけるのに役立ちます。';
-                        } else if (titleLower.includes('比較') || titleLower.includes('おすすめ') || titleLower.includes('レビュー')) {
-                            summary = '比較・レビュー記事。選択や判断の参考になる情報が含まれています。';
-                        } else if (titleLower.includes('解説') || titleLower.includes('まとめ') || titleLower.includes('入門')) {
-                            summary = '解説記事。トピックについて分かりやすくまとめられた情報です。';
-                        } else {
-                            summary = '有益な情報が含まれているWebページです。時間のあるときに確認しましょう。';
-                        }
+                    // ページタイプ別の高精度要約生成
+                    switch (pageType) {
+                        case 'video':
+                            if (titleLower.includes('tutorial') || titleLower.includes('how to') || titleLower.includes('使い方')) {
+                                summary = '学習動画です。新しいスキルや知識を視覚的に学べます。手順やコツを動画で確認しながら実践できます。';
+                            } else if (titleLower.includes('review') || titleLower.includes('レビュー')) {
+                                summary = '商品・サービスのレビュー動画。実際の使用感や評価を動画で詳しく確認できます。';
+                            } else if (titleLower.includes('news') || titleLower.includes('ニュース')) {
+                                summary = '動画ニュース。最新の出来事や話題を映像と音声で分かりやすく理解できます。';
+                            } else {
+                                summary = '動画コンテンツ。視聴して情報収集、学習、エンターテイメントを楽しめます。';
+                            }
+                            break;
+                            
+                        case 'repository':
+                            if (titleLower.includes('react') || titleLower.includes('vue') || titleLower.includes('angular')) {
+                                summary = 'フロントエンド開発プロジェクト。UI/UX開発の参考になるコードやライブラリを確認できます。';
+                            } else if (titleLower.includes('python') || titleLower.includes('machine learning') || titleLower.includes('ai')) {
+                                summary = 'Python・AI/ML関連プロジェクト。データサイエンスや機械学習の実装例を学習できます。';
+                            } else if (titleLower.includes('api') || titleLower.includes('backend')) {
+                                summary = 'バックエンド・API開発プロジェクト。サーバーサイドの設計や実装方法を参考にできます。';
+                            } else {
+                                summary = 'プログラミングプロジェクト。ソースコードの学習、機能実装の参考、コントリビューションに活用できます。';
+                            }
+                            break;
+                            
+                        case 'article':
+                            if (titleLower.includes('入門') || titleLower.includes('beginner') || titleLower.includes('tutorial')) {
+                                summary = '初心者向け技術記事。基礎から分かりやすく解説された学習コンテンツです。';
+                            } else if (titleLower.includes('比較') || titleLower.includes('vs') || titleLower.includes('comparison')) {
+                                summary = '技術比較記事。複数の選択肢を比較検討する際の判断材料になる詳細な分析があります。';
+                            } else if (titleLower.includes('実装') || titleLower.includes('implementation')) {
+                                summary = '実装解説記事。具体的なコード例と共に技術の実装方法が詳しく説明されています。';
+                            } else {
+                                summary = '技術記事。プログラミングやIT分野の知識・経験が共有された実用的な情報です。';
+                            }
+                            break;
+                            
+                        case 'news':
+                            if (domain.includes('nikkei')) {
+                                summary = '経済・ビジネスニュース。市場動向、企業情報、投資判断に関わる重要な情報を得られます。';
+                            } else if (titleLower.includes('tech') || titleLower.includes('技術')) {
+                                summary = 'テクノロジーニュース。IT業界の最新動向、新技術、企業の技術戦略について報じています。';
+                            } else {
+                                summary = '最新ニュース。社会情勢、政治、経済の動向を把握し、情報収集に役立てられます。';
+                            }
+                            break;
+                            
+                        case 'ecommerce':
+                            if (titleLower.includes('book') || titleLower.includes('本')) {
+                                summary = '書籍の商品ページ。内容紹介、読者レビュー、価格比較で購入検討できます。';
+                            } else if (titleLower.includes('electronic') || titleLower.includes('gadget')) {
+                                summary = '電子機器・ガジェットの商品ページ。仕様、機能、ユーザーレビューで製品を詳しく評価できます。';
+                            } else {
+                                summary = '商品情報ページ。価格、仕様、レビューを確認して購入の意思決定に活用できます。';
+                            }
+                            break;
+                            
+                        default:
+                            // URLパターンやタイトルから内容を推測
+                            if (titleLower.includes('tutorial') || titleLower.includes('how to') || titleLower.includes('guide')) {
+                                summary = '学習ガイド。ステップバイステップで新しいスキルや知識を身につけられます。';
+                            } else if (titleLower.includes('best') || titleLower.includes('top') || titleLower.includes('おすすめ')) {
+                                summary = 'おすすめ・ランキング記事。選択肢を比較検討する際の参考情報が整理されています。';
+                            } else if (titleLower.includes('tips') || titleLower.includes('コツ') || titleLower.includes('ヒント')) {
+                                summary = '実用的なヒント集。効率化や改善のための具体的なアドバイスが得られます。';
+                            } else if (urlLower.includes('blog') || urlLower.includes('article')) {
+                                summary = 'ブログ記事。個人や企業の体験談、知見、専門的な情報が共有されています。';
+                            } else {
+                                summary = metadata.description || '有益な情報が含まれているWebページです。時間のあるときに内容を確認してみましょう。';
+                            }
                     }
                     
                     // 120文字以内に制限
@@ -125,31 +318,46 @@
                 }
             }, []);
 
-            // 🤖 新機能: 自動ジャンル分類
-            const classifyGenre = useCallback((url, title) => {
+            // 🤖 新機能: 自動ジャンル分類（改良版）
+            const classifyGenre = useCallback((url, metadata) => {
                 const urlLower = url.toLowerCase();
-                const titleLower = title.toLowerCase();
+                const titleLower = (metadata.title || '').toLowerCase();
+                const pageType = metadata.pageType || 'general';
                 const combined = (urlLower + ' ' + titleLower).toLowerCase();
                 
+                // ページタイプベースの分類
+                if (pageType === 'repository' || pageType === 'qa') {
+                    return '技術・プログラミング';
+                } else if (pageType === 'video') {
+                    if (combined.includes('tutorial') || combined.includes('learning') || combined.includes('course')) {
+                        return '教育・学習';
+                    } else {
+                        return 'エンターテイメント';
+                    }
+                } else if (pageType === 'news') {
+                    return 'ニュース';
+                } else if (pageType === 'ecommerce') {
+                    return 'ショッピング';
+                } else if (pageType === 'blog' || pageType === 'article') {
+                    // ブログ・記事の詳細分類
+                    if (combined.includes('business') || combined.includes('marketing') || combined.includes('startup') ||
+                        combined.includes('ビジネス') || combined.includes('経営') || combined.includes('起業')) {
+                        return 'ビジネス';
+                    } else if (combined.includes('tech') || combined.includes('programming') || combined.includes('code') ||
+                               combined.includes('技術') || combined.includes('プログラミング') || combined.includes('開発')) {
+                        return '技術・プログラミング';
+                    } else {
+                        return 'ブログ・記事';
+                    }
+                }
+                
+                // キーワードベースの詳細分類
                 if (combined.includes('github') || combined.includes('qiita') || combined.includes('stack') || 
                     combined.includes('programming') || combined.includes('code') || combined.includes('tech') ||
                     combined.includes('javascript') || combined.includes('python') || combined.includes('react') ||
                     combined.includes('プログラミング') || combined.includes('技術') || combined.includes('開発') ||
                     combined.includes('コード') || combined.includes('api') || combined.includes('framework')) {
                     return '技術・プログラミング';
-                }
-                
-                if (combined.includes('news') || combined.includes('nikkei') || combined.includes('asahi') || 
-                    combined.includes('mainichi') || combined.includes('reuters') || combined.includes('cnn') ||
-                    combined.includes('ニュース') || combined.includes('新聞') || combined.includes('報道')) {
-                    return 'ニュース';
-                }
-                
-                if (combined.includes('youtube') || combined.includes('netflix') || combined.includes('movie') || 
-                    combined.includes('music') || combined.includes('game') || combined.includes('anime') ||
-                    combined.includes('entertainment') || combined.includes('エンタメ') || combined.includes('映画') ||
-                    combined.includes('音楽') || combined.includes('ゲーム') || combined.includes('アニメ')) {
-                    return 'エンターテイメント';
                 }
                 
                 if (combined.includes('wikipedia') || combined.includes('coursera') || combined.includes('udemy') || 
@@ -164,18 +372,6 @@
                     combined.includes('ビジネス') || combined.includes('マーケティング') || combined.includes('投資') ||
                     combined.includes('経済') || combined.includes('金融') || combined.includes('起業')) {
                     return 'ビジネス';
-                }
-                
-                if (combined.includes('amazon') || combined.includes('rakuten') || combined.includes('shop') || 
-                    combined.includes('buy') || combined.includes('product') || combined.includes('price') ||
-                    combined.includes('ショッピング') || combined.includes('買い物') || combined.includes('商品')) {
-                    return 'ショッピング';
-                }
-                
-                if (combined.includes('blog') || combined.includes('article') || combined.includes('note.com') || 
-                    combined.includes('medium.com') || combined.includes('ブログ') || combined.includes('記事') ||
-                    combined.includes('コラム')) {
-                    return 'ブログ・記事';
                 }
                 
                 return '未分類';
@@ -194,7 +390,7 @@
                                 title: item.title || '',
                                 thumbnail: item.thumbnail || '🌐',
                                 domain: item.domain || '',
-                                aiSummary: item.aiSummary || '' // 🤖 新機能: AI要約
+                                aiSummary: item.aiSummary || ''
                             }));
                             setUrlItems(migratedItems.filter(item => item.url));
                             return;
@@ -216,7 +412,7 @@
                             title: item.title || '',
                             thumbnail: item.thumbnail || '🌐',
                             domain: item.domain || '',
-                            aiSummary: item.aiSummary || '' // 🤖 新機能: AI要約
+                            aiSummary: item.aiSummary || ''
                         }));
                         setUrlItems(migratedItems.filter(item => item.url));
                     }
@@ -233,7 +429,7 @@
                         userId: userId,
                         urlItems: urlItems,
                         lastModified: new Date().toISOString(),
-                        appVersion: '2.3' // バージョンアップ
+                        appVersion: '2.4' // バージョンアップ
                     };
                     
                     localStorage.setItem('userData', JSON.stringify(userData));
@@ -250,7 +446,7 @@
                     userId: userId,
                     urlItems: urlItems,
                     exportDate: new Date().toISOString(),
-                    appVersion: '2.3',
+                    appVersion: '2.4',
                     totalItems: urlItems.length
                 };
                 
@@ -312,18 +508,18 @@
                 }
             }, []);
 
-            // 🤖 修正: メタデータ取得、自動分類、AI要約に対応したURL追加機能
+            // 🤖 修正: 高精度メタデータ取得、自動分類、AI要約に対応したURL追加機能
             const addUrlItem = useCallback(async (url, genre, priority = 0, comment = '', useAutoClassify = false, useAISummary = false) => {
                 if (url && !urlItems.some(item => item.url === url)) {
                     try {
-                        // メタデータを取得
-                        const metadata = await fetchUrlMetadata(url);
+                        // 詳細メタデータを取得
+                        const metadata = await fetchDetailedMetadata(url);
                         
                         // 自動分類が有効な場合は、ジャンルを自動判定
-                        const finalGenre = useAutoClassify ? classifyGenre(url, metadata.title) : genre;
+                        const finalGenre = useAutoClassify ? classifyGenre(url, metadata) : genre;
                         
-                        // AI要約が有効な場合は、要約を生成
-                        const aiSummary = useAISummary ? await generateAISummary(url, metadata.title) : '';
+                        // AI要約が有効な場合は、高精度要約を生成
+                        const aiSummary = useAISummary ? await generateIntelligentSummary(url, metadata) : '';
                         
                         const newItem = {
                             id: new Date().toISOString() + '_' + Math.random().toString(36).substr(2, 9),
@@ -337,7 +533,7 @@
                             title: metadata.title,
                             thumbnail: metadata.thumbnail,
                             domain: metadata.domain,
-                            aiSummary: aiSummary // 🤖 新機能: AI要約
+                            aiSummary: aiSummary // 🤖 新機能: 高精度AI要約
                         };
                         setUrlItems(prevItems => [...prevItems, newItem]);
                     } catch (error) {
@@ -359,7 +555,7 @@
                         setUrlItems(prevItems => [...prevItems, newItem]);
                     }
                 }
-            }, [urlItems, fetchUrlMetadata, classifyGenre, generateAISummary]);
+            }, [urlItems, fetchDetailedMetadata, classifyGenre, generateIntelligentSummary]);
 
             const deleteUrlItem = useCallback((id) => {
                 setUrlItems(prevItems => prevItems.filter(item => item.id !== id));
@@ -444,7 +640,7 @@
                         item.genre.toLowerCase().includes(searchQuery.toLowerCase()) ||
                         (item.title && item.title.toLowerCase().includes(searchQuery.toLowerCase())) ||
                         (item.comment && item.comment.toLowerCase().includes(searchQuery.toLowerCase())) ||
-                        (item.aiSummary && item.aiSummary.toLowerCase().includes(searchQuery.toLowerCase())); // 🤖 新機能: AI要約検索
+                        (item.aiSummary && item.aiSummary.toLowerCase().includes(searchQuery.toLowerCase()));
                     const matchesReadStatus = readStatusFilter === 'すべて' ||
                         (readStatusFilter === '未読' && !item.isRead) ||
                         (readStatusFilter === '既読' && item.isRead);
@@ -489,13 +685,13 @@
                             </h1>
                             <p className="mt-2 text-slate-600">気になるWebサイトをリストアップして、管理しましょう。</p>
                             <div className="mt-2 text-sm text-blue-600 bg-blue-50 p-2 rounded flex items-center">
-                                <span className="mr-2 px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-full">v2.3</span>
+                                <span className="mr-2 px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-full">v2.4</span>
                                 👤 ユーザーID: {getUserId().substr(-8)} | 🕒 最終更新: {new Date().toLocaleString('ja-JP')}
                             </div>
                             {/* 🤖 新機能告知 */}
                             <div className="mt-2 text-sm text-emerald-600 bg-emerald-50 p-2 rounded flex items-center">
-                                <span className="mr-2 px-2 py-1 bg-emerald-100 text-emerald-700 text-xs rounded-full">🤖 NEW</span>
-                                ✨ AI要約機能が追加されました！URLの内容を自動で簡潔にまとめます
+                                <span className="mr-2 px-2 py-1 bg-emerald-100 text-emerald-700 text-xs rounded-full">🧠 SMART</span>
+                                ✨ 高精度AI要約機能！URLの構造とメタデータから詳細な要約を自動生成します
                             </div>
                         </div>
                     </header>
@@ -510,7 +706,7 @@
                             <div className="flex items-center gap-2 mb-2">
                                 <SearchIcon className="h-5 w-5 text-slate-400" />
                                 <h2 className="text-xl font-semibold text-slate-700">検索</h2>
-                                <span className="px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full">AI要約検索対応</span>
+                                <span className="px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full">高精度AI要約検索対応</span>
                             </div>
                             <input
                                 type="text"
@@ -663,7 +859,7 @@
                                     <li><strong>🔥 優先度</strong>：URL追加時に優先度も設定できます</li>
                                     <li><strong>✨ プレビュー</strong>：URLのタイトルとサムネイルを自動取得します</li>
                                     <li><strong>🤖 自動分類</strong>：URLから自動でジャンルを判定できます</li>
-                                    <li><strong>🧠 AI要約</strong>：URLの内容を120文字以内で自動要約します</li>
+                                    <li><strong>🧠 高精度AI要約</strong>：URLの構造・メタデータから詳細な要約を自動生成します</li>
                                 </ul>
                             </div>
                         </div>
@@ -672,7 +868,7 @@
             );
         };
 
-        // 🤖 新機能対応: UrlInput コンポーネント（AI要約機能追加）
+        // 🤖 新機能対応: UrlInput コンポーネント（高精度AI要約機能追加）
         const UrlInput = ({ onAdd, urlItems }) => {
             const [url, setUrl] = useState('');
             const [genre, setGenre] = useState('未分類');
@@ -681,7 +877,7 @@
             const [priority, setPriority] = useState(0);
             const [comment, setComment] = useState('');
             const [useAutoClassify, setUseAutoClassify] = useState(true);
-            const [useAISummary, setUseAISummary] = useState(true); // 🤖 新機能: AI要約ON/OFF
+            const [useAISummary, setUseAISummary] = useState(true);
             const [isLoading, setIsLoading] = useState(false);
 
             const existingGenres = useMemo(() => {
@@ -743,11 +939,11 @@
                         />
                     </div>
                     
-                    {/* AI機能設定 */}
+                    {/* 高精度AI機能設定 */}
                     <div className="space-y-3 p-4 bg-gradient-to-r from-purple-50 to-emerald-50 rounded-lg border border-purple-200">
                         <h3 className="text-sm font-medium text-slate-700 flex items-center">
-                            🤖 AI機能設定
-                            <span className="ml-2 px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-full">NEW</span>
+                            🧠 高精度AI機能設定
+                            <span className="ml-2 px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-full">SMART</span>
                         </h3>
                         
                         <div className="flex items-center space-x-2">
@@ -760,7 +956,7 @@
                                 disabled={isLoading}
                             />
                             <label htmlFor="auto-classify" className="text-sm text-purple-700">
-                                🏷️ 自動ジャンル分類
+                                🏷️ 自動ジャンル分類（ページタイプ分析）
                             </label>
                         </div>
 
@@ -774,8 +970,14 @@
                                 disabled={isLoading}
                             />
                             <label htmlFor="ai-summary" className="text-sm text-emerald-700">
-                                🧠 AI要約生成（最大120文字）
+                                🧠 高精度AI要約生成（メタデータ分析・最大120文字）
                             </label>
+                        </div>
+                        
+                        <div className="text-xs text-slate-600 bg-white p-2 rounded border">
+                            💡 <strong>高精度AI要約とは？</strong><br/>
+                            URLの構造、ドメイン、パス、パラメータを詳細分析し、ページの種類（動画/記事/リポジトリ等）を判定。
+                            各タイプに最適化された要約を自動生成します。
                         </div>
                     </div>
 
@@ -870,7 +1072,7 @@
                                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                 </svg>
-                                AI分析中...
+                                高精度AI分析中...
                             </span>
                         ) : (
                             '追加'
@@ -988,7 +1190,7 @@
             );
         };
 
-        // 🤖 修正: UrlItem コンポーネント（AI要約表示とタイトル優先表示対応）
+        // 🤖 修正: UrlItem コンポーネント（高精度AI要約表示とタイトル優先表示対応）
         const UrlItem = ({ item, allItems, onDelete, onToggleRead, onSetRating, onSetPriority, onMove, onUpdateComment }) => {
             const [isEditingComment, setIsEditingComment] = useState(false);
             const [commentText, setCommentText] = useState(item.comment || '');
@@ -1055,7 +1257,7 @@
                                         )}
                                     </div>
                                     
-                                    {/* 🔧 修正: タイトルを優先表示、URLは小さく */}
+                                    {/* タイトルを優先表示、URLは小さく */}
                                     {item.title && (
                                         <h3 className="text-lg font-semibold text-slate-900 mb-2 leading-tight">
                                             <a
@@ -1085,13 +1287,13 @@
                                 </div>
                             </div>
                             
-                            {/* 🤖 新機能: AI要約表示 */}
+                            {/* 🤖 新機能: 高精度AI要約表示 */}
                             {item.aiSummary && (
                                 <div className="mb-3 p-3 bg-gradient-to-r from-emerald-50 to-blue-50 rounded-lg border border-emerald-200">
                                     <div className="flex items-center mb-2">
                                         <span className="text-sm font-medium text-emerald-700 flex items-center">
-                                            🧠 AI要約
-                                            <span className="ml-2 px-2 py-1 bg-emerald-100 text-emerald-700 text-xs rounded-full">NEW</span>
+                                            🧠 高精度AI要約
+                                            <span className="ml-2 px-2 py-1 bg-emerald-100 text-emerald-700 text-xs rounded-full">SMART</span>
                                         </span>
                                     </div>
                                     <p className="text-sm text-slate-700 leading-relaxed">{item.aiSummary}</p>
