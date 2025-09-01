@@ -169,8 +169,8 @@
                 }
             }, [apiKey]);
 
-            // URLメタデータ取得（AI分析対応）
-            const fetchUrlMetadata = useCallback(async (url) => {
+            // 🆕 修正: URLメタデータ取得（useAiTitle パラメータ追加）
+            const fetchUrlMetadata = useCallback(async (url, useAiTitle = false) => {
                 try {
                     console.log('Starting metadata fetch for:', url);
                     
@@ -200,8 +200,8 @@
                         thumbnail = '🌐';
                     }
 
-                    // APIキーが設定されている場合はAI分析を実行
-                    if (apiKey) {
+                    // 🆕 修正: useAiTitle が true かつ APIキーが設定されている場合のみAI分析を実行
+                    if (useAiTitle && apiKey) {
                         try {
                             const content = await fetchUrlContent(url);
                             const aiTitle = await analyzeWithAI(content, content.title);
@@ -437,11 +437,11 @@
                 }
             }, []);
 
-            // 🔥 修正: URL追加機能（リストの先頭に追加）
-            const addUrlItem = useCallback(async (url, genre, priority = 0, comment = '', useAutoClassify = false) => {
+            // 🆕 修正: URL追加機能（useAiTitle パラメータ追加）
+            const addUrlItem = useCallback(async (url, genre, priority = 0, comment = '', useAutoClassify = false, useAiTitle = false) => {
                 if (url && !urlItems.some(item => item.url === url)) {
                     try {
-                        const metadata = await fetchUrlMetadata(url);
+                        const metadata = await fetchUrlMetadata(url, useAiTitle);
                         const finalGenre = useAutoClassify ? classifyGenre(url, metadata.title) : genre;
                         
                         const newItem = {
@@ -457,7 +457,6 @@
                             thumbnail: metadata.thumbnail,
                             domain: metadata.domain
                         };
-                        // 🔥 修正: 配列の先頭に追加
                         setUrlItems(prevItems => [newItem, ...prevItems]);
                     } catch (error) {
                         console.error('URLメタデータの取得に失敗:', error);
@@ -474,7 +473,6 @@
                             thumbnail: '🌐',
                             domain: ''
                         };
-                        // 🔥 修正: 配列の先頭に追加
                         setUrlItems(prevItems => [newItem, ...prevItems]);
                     }
                 }
@@ -864,7 +862,7 @@
             );
         };
 
-        // UrlInputコンポーネント（AI分析対応）
+        // 🆕 修正: UrlInputコンポーネント（AIタイトル生成チェックボックス追加）
         const UrlInput = ({ onAdd, urlItems, apiKey }) => {
             const [url, setUrl] = useState('');
             const [genre, setGenre] = useState('未分類');
@@ -873,6 +871,7 @@
             const [priority, setPriority] = useState(0);
             const [comment, setComment] = useState('');
             const [useAutoClassify, setUseAutoClassify] = useState(true);
+            const [useAiTitle, setUseAiTitle] = useState(true); // 🆕 AIタイトル生成のON/OFF
             const [isLoading, setIsLoading] = useState(false);
             const [loadingMessage, setLoadingMessage] = useState('');
 
@@ -891,14 +890,14 @@
                 if (url.trim()) {
                     setIsLoading(true);
                     try {
-                        if (apiKey) {
+                        if (apiKey && useAiTitle) {
                             setLoadingMessage('AI分析中...');
                         } else {
                             setLoadingMessage('URLを処理中...');
                         }
                         
                         const finalGenre = isCustomGenre && customGenre.trim() ? customGenre.trim() : genre;
-                        await onAdd(url.trim(), finalGenre, priority, comment.trim(), useAutoClassify);
+                        await onAdd(url.trim(), finalGenre, priority, comment.trim(), useAutoClassify, useAiTitle);
                         
                         setUrl('');
                         setGenre('未分類');
@@ -943,13 +942,42 @@
                         />
                     </div>
                     
-                    {/* AI分析機能の状態表示 */}
+                    {/* 🆕 AIタイトル生成機能のON/OFF */}
                     {apiKey && (
+                        <div className="flex items-center space-x-2 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                            <input
+                                id="use-ai-title"
+                                type="checkbox"
+                                checked={useAiTitle}
+                                onChange={(e) => setUseAiTitle(e.target.checked)}
+                                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-blue-300 rounded"
+                                disabled={isLoading}
+                            />
+                            <label htmlFor="use-ai-title" className="text-sm text-blue-700 flex items-center">
+                                🤖 AIタイトル自動生成を使用
+                                <span className="ml-2 px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-full">120文字要約</span>
+                            </label>
+                        </div>
+                    )}
+
+                    {/* AI分析機能の状態表示 */}
+                    {apiKey && useAiTitle && (
                         <div className="flex items-center space-x-2 p-3 bg-green-50 rounded-lg border border-green-200">
-                            <div className="text-green-600">🤖</div>
+                            <div className="text-green-600">✅</div>
                             <div className="text-sm text-green-700">
                                 <span className="font-medium">AI分析機能が有効です</span>
-                                <div className="text-xs">URLの内容を分析して説明的なタイトルを生成します</div>
+                                <div className="text-xs">URLの内容を分析して120文字以内の説明的なタイトルを生成します</div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* APIキー未設定またはAI機能OFF時の表示 */}
+                    {(!apiKey || !useAiTitle) && (
+                        <div className="flex items-center space-x-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                            <div className="text-gray-600">📝</div>
+                            <div className="text-sm text-gray-700">
+                                <span className="font-medium">従来のタイトル取得を使用</span>
+                                <div className="text-xs">ドメインベースの簡易タイトルを生成します</div>
                             </div>
                         </div>
                     )}
