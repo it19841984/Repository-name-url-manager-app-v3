@@ -437,7 +437,7 @@
                 }
             }, []);
 
-            // URL追加機能（AI分析対応）
+            // 🔥 修正: URL追加機能（リストの先頭に追加）
             const addUrlItem = useCallback(async (url, genre, priority = 0, comment = '', useAutoClassify = false) => {
                 if (url && !urlItems.some(item => item.url === url)) {
                     try {
@@ -457,7 +457,8 @@
                             thumbnail: metadata.thumbnail,
                             domain: metadata.domain
                         };
-                        setUrlItems(prevItems => [...prevItems, newItem]);
+                        // 🔥 修正: 配列の先頭に追加
+                        setUrlItems(prevItems => [newItem, ...prevItems]);
                     } catch (error) {
                         console.error('URLメタデータの取得に失敗:', error);
                         const newItem = {
@@ -473,7 +474,8 @@
                             thumbnail: '🌐',
                             domain: ''
                         };
-                        setUrlItems(prevItems => [...prevItems, newItem]);
+                        // 🔥 修正: 配列の先頭に追加
+                        setUrlItems(prevItems => [newItem, ...prevItems]);
                     }
                 }
             }, [urlItems, fetchUrlMetadata, classifyGenre]);
