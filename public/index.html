@@ -22,8 +22,10 @@
             const [sortBy, setSortBy] = useState('created');
             const [sortDirection, setSortDirection] = useState('desc');
             const [searchQuery, setSearchQuery] = useState('');
+            const [showSettings, setShowSettings] = useState(false);
+            const [apiKey, setApiKey] = useState('');
 
-            // 🎉 新機能: ユーザーID生成・取得
+            // ユーザーID生成・取得
             const getUserId = useCallback(() => {
                 let userId = localStorage.getItem('userId');
                 if (!userId) {
@@ -33,104 +35,224 @@
                 return userId;
             }, []);
 
-            // 🚀 新機能: URLメタデータ取得（プレビュー機能）
+            // APIキー管理
+            useEffect(() => {
+                const savedApiKey = localStorage.getItem('openai_api_key');
+                if (savedApiKey) {
+                    try {
+                        const decryptedKey = atob(savedApiKey);
+                        setApiKey(decryptedKey);
+                        console.log('OpenAI API Key loaded successfully');
+                    } catch (error) {
+                        console.error('Failed to load API key:', error);
+                    }
+                }
+            }, []);
+
+            const saveApiKey = useCallback((key) => {
+                try {
+                    const encryptedKey = btoa(key);
+                    localStorage.setItem('openai_api_key', encryptedKey);
+                    setApiKey(key);
+                    console.log('OpenAI API Key saved successfully');
+                } catch (error) {
+                    console.error('Failed to save API key:', error);
+                }
+            }, []);
+
+            // URLコンテンツ取得（CORSプロキシ使用）
+            const fetchUrlContent = useCallback(async (url) => {
+                try {
+                    console.log('Fetching content from URL:', url);
+                    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+                    const response = await fetch(proxyUrl);
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    const data = await response.json();
+                    const html = data.contents;
+                    
+                    // HTMLからテキストコンテンツを抽出
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(html, 'text/html');
+                    
+                    // title要素を取得
+                    const title = doc.querySelector('title')?.textContent || '';
+                    
+                    // メタディスクリプションを取得
+                    const metaDescription = doc.querySelector('meta[name="description"]')?.getAttribute('content') || '';
+                    
+                    // 主要なテキストコンテンツを取得（スクリプト、スタイルを除外）
+                    const scripts = doc.querySelectorAll('script, style, nav, footer, header');
+                    scripts.forEach(script => script.remove());
+                    
+                    const bodyText = doc.body?.textContent || doc.textContent || '';
+                    const cleanText = bodyText.replace(/\s+/g, ' ').trim().substring(0, 3000);
+                    
+                    console.log('Content extraction successful:', {
+                        title: title.substring(0, 100),
+                        description: metaDescription.substring(0, 100),
+                        content: cleanText.substring(0, 200)
+                    });
+                    
+                    return {
+                        title,
+                        description: metaDescription,
+                        content: cleanText
+                    };
+                } catch (error) {
+                    console.error('Content fetch error:', error);
+                    throw error;
+                }
+            }, []);
+
+            // AI分析機能
+            const analyzeWithAI = useCallback(async (content, originalTitle) => {
+                if (!apiKey) {
+                    console.warn('No API key configured for AI analysis');
+                    return originalTitle || 'Webページ';
+                }
+
+                try {
+                    console.log('Analyzing with AI...');
+                    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${apiKey}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            model: 'gpt-3.5-turbo',
+                            messages: [
+                                {
+                                    role: 'system',
+                                    content: 'あなたはWebページの内容を分析して、分かりやすいタイトルを生成する専門家です。ページの内容を理解し、全角120文字以内で、そのページが何について書かれているのかを明確に説明するタイトルを生成してください。技術的すぎず、一般の人にも理解しやすい言葉を使ってください。'
+                                },
+                                {
+                                    role: 'user',
+                                    content: `以下のWebページ内容を分析して、内容が分かりやすいタイトルを全角120文字以内で生成してください。
+
+元のタイトル: ${originalTitle}
+メタディスクリプション: ${content.description}
+ページ内容: ${content.content}
+
+生成するタイトルは、このページが何について書かれているのか、どんな情報が得られるのかを明確に説明してください。`
+                                }
+                            ],
+                            max_tokens: 150,
+                            temperature: 0.3
+                        })
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.text();
+                        console.error('OpenAI API error:', response.status, errorData);
+                        throw new Error(`OpenAI API error: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    const generatedTitle = data.choices[0]?.message?.content?.trim();
+                    
+                    if (generatedTitle) {
+                        console.log('AI analysis completed successfully:', generatedTitle);
+                        // 120文字制限を確実に適用
+                        return generatedTitle.length > 120 ? generatedTitle.substring(0, 120) : generatedTitle;
+                    } else {
+                        console.warn('No generated title received from AI');
+                        return originalTitle || 'Webページ';
+                    }
+                } catch (error) {
+                    console.error('AI analysis error:', error);
+                    return originalTitle || 'Webページ';
+                }
+            }, [apiKey]);
+
+            // URLメタデータ取得（AI分析対応）
             const fetchUrlMetadata = useCallback(async (url) => {
                 try {
+                    console.log('Starting metadata fetch for:', url);
+                    
+                    // URLからドメイン情報を取得
                     const urlObj = new URL(url);
                     const domain = urlObj.hostname.toLowerCase();
                     
-                    let title = '';
+                    // ドメインベースでのアイコン生成
                     let thumbnail = '';
-                    
                     if (domain.includes('youtube.com') || domain.includes('youtu.be')) {
-                        title = 'YouTube動画';
                         thumbnail = '🎥';
                     } else if (domain.includes('github.com')) {
-                        title = 'GitHub リポジトリ';
                         thumbnail = '💻';
                     } else if (domain.includes('qiita.com')) {
-                        title = 'Qiita記事';
                         thumbnail = '📝';
                     } else if (domain.includes('note.com') || domain.includes('medium.com')) {
-                        title = 'ブログ記事';
                         thumbnail = '✍️';
                     } else if (domain.includes('twitter.com') || domain.includes('x.com')) {
-                        title = 'Twitter/X投稿';
                         thumbnail = '🐦';
                     } else if (domain.includes('amazon.co.jp') || domain.includes('amazon.com')) {
-                        title = 'Amazon商品';
                         thumbnail = '🛒';
                     } else if (domain.includes('wikipedia.org')) {
-                        title = 'Wikipedia記事';
                         thumbnail = '📚';
                     } else if (domain.includes('news') || domain.includes('nikkei') || domain.includes('asahi') || domain.includes('mainichi')) {
-                        title = 'ニュース記事';
                         thumbnail = '📰';
                     } else {
-                        title = `${domain}のページ`;
                         thumbnail = '🌐';
                     }
-                    
-                    return { title, thumbnail, domain };
-                } catch (error) {
-                    return { title: 'Webページ', thumbnail: '🌐', domain: '' };
-                }
-            }, []);
 
-            // 🤖 新機能: AI要約機能（模擬実装）
-            const generateAISummary = useCallback(async (url, title) => {
-                try {
-                    // URLとタイトルから要約を生成（実際のAI APIがないため、模擬実装）
-                    const urlLower = url.toLowerCase();
-                    const titleLower = title.toLowerCase();
-                    
-                    let summary = '';
-                    
-                    // ドメインベースでの要約生成
-                    if (urlLower.includes('youtube.com') || urlLower.includes('youtu.be')) {
-                        summary = '動画コンテンツ。視聴して学習や娯楽に活用できます。';
-                    } else if (urlLower.includes('github.com')) {
-                        summary = 'プログラミング関連のリポジトリ。コードの参考や学習に役立ちます。';
-                    } else if (urlLower.includes('qiita.com')) {
-                        summary = '技術記事。プログラミングや開発に関する知識が得られます。';
-                    } else if (urlLower.includes('note.com') || urlLower.includes('medium.com')) {
-                        summary = 'ブログ記事。様々な分野の知見や体験談が読めます。';
-                    } else if (urlLower.includes('wikipedia.org')) {
-                        summary = '百科事典記事。幅広いトピックについて詳しい情報が得られます。';
-                    } else if (urlLower.includes('news') || urlLower.includes('nikkei') || urlLower.includes('asahi')) {
-                        summary = '最新ニュース記事。時事情報や社会の動向を把握できます。';
-                    } else if (urlLower.includes('amazon')) {
-                        summary = '商品ページ。購入検討や商品情報の確認に使用できます。';
-                    } else {
-                        // キーワードベースでの要約生成
-                        if (titleLower.includes('チュートリアル') || titleLower.includes('tutorial') || titleLower.includes('使い方')) {
-                            summary = '学習コンテンツ。新しいスキルや知識を身につけるのに役立ちます。';
-                        } else if (titleLower.includes('比較') || titleLower.includes('おすすめ') || titleLower.includes('レビュー')) {
-                            summary = '比較・レビュー記事。選択や判断の参考になる情報が含まれています。';
-                        } else if (titleLower.includes('解説') || titleLower.includes('まとめ') || titleLower.includes('入門')) {
-                            summary = '解説記事。トピックについて分かりやすくまとめられた情報です。';
-                        } else {
-                            summary = '有益な情報が含まれているWebページです。時間のあるときに確認しましょう。';
+                    // APIキーが設定されている場合はAI分析を実行
+                    if (apiKey) {
+                        try {
+                            const content = await fetchUrlContent(url);
+                            const aiTitle = await analyzeWithAI(content, content.title);
+                            
+                            return { 
+                                title: aiTitle, 
+                                thumbnail, 
+                                domain: urlObj.hostname 
+                            };
+                        } catch (error) {
+                            console.warn('AI analysis failed, falling back to simple title:', error);
+                            // AI分析失敗時は従来の方法にフォールバック
                         }
                     }
-                    
-                    // 120文字以内に制限
-                    if (summary.length > 120) {
-                        summary = summary.substring(0, 117) + '...';
+
+                    // フォールバック：シンプルなタイトル生成
+                    let fallbackTitle = '';
+                    if (domain.includes('youtube.com') || domain.includes('youtu.be')) {
+                        fallbackTitle = 'YouTube動画';
+                    } else if (domain.includes('github.com')) {
+                        fallbackTitle = 'GitHub リポジトリ';
+                    } else if (domain.includes('qiita.com')) {
+                        fallbackTitle = 'Qiita記事';
+                    } else if (domain.includes('note.com') || domain.includes('medium.com')) {
+                        fallbackTitle = 'ブログ記事';
+                    } else if (domain.includes('twitter.com') || domain.includes('x.com')) {
+                        fallbackTitle = 'Twitter/X投稿';
+                    } else if (domain.includes('amazon.co.jp') || domain.includes('amazon.com')) {
+                        fallbackTitle = 'Amazon商品';
+                    } else if (domain.includes('wikipedia.org')) {
+                        fallbackTitle = 'Wikipedia記事';
+                    } else if (domain.includes('news') || domain.includes('nikkei') || domain.includes('asahi') || domain.includes('mainichi')) {
+                        fallbackTitle = 'ニュース記事';
+                    } else {
+                        fallbackTitle = `${domain.replace('www.', '')}のページ`;
                     }
                     
-                    return summary;
+                    return { title: fallbackTitle, thumbnail, domain: urlObj.hostname };
                 } catch (error) {
-                    return 'このページには有益な情報が含まれている可能性があります。';
+                    console.error('Metadata fetch error:', error);
+                    return { title: 'Webページ', thumbnail: '🌐', domain: '' };
                 }
-            }, []);
+            }, [apiKey, fetchUrlContent, analyzeWithAI]);
 
-            // 🤖 新機能: 自動ジャンル分類
+            // 自動ジャンル分類
             const classifyGenre = useCallback((url, title) => {
                 const urlLower = url.toLowerCase();
                 const titleLower = title.toLowerCase();
                 const combined = (urlLower + ' ' + titleLower).toLowerCase();
                 
+                // プログラミング・技術系
                 if (combined.includes('github') || combined.includes('qiita') || combined.includes('stack') || 
                     combined.includes('programming') || combined.includes('code') || combined.includes('tech') ||
                     combined.includes('javascript') || combined.includes('python') || combined.includes('react') ||
@@ -139,12 +261,14 @@
                     return '技術・プログラミング';
                 }
                 
+                // ニュース
                 if (combined.includes('news') || combined.includes('nikkei') || combined.includes('asahi') || 
                     combined.includes('mainichi') || combined.includes('reuters') || combined.includes('cnn') ||
                     combined.includes('ニュース') || combined.includes('新聞') || combined.includes('報道')) {
                     return 'ニュース';
                 }
                 
+                // エンターテイメント
                 if (combined.includes('youtube') || combined.includes('netflix') || combined.includes('movie') || 
                     combined.includes('music') || combined.includes('game') || combined.includes('anime') ||
                     combined.includes('entertainment') || combined.includes('エンタメ') || combined.includes('映画') ||
@@ -152,6 +276,7 @@
                     return 'エンターテイメント';
                 }
                 
+                // 教育・学習
                 if (combined.includes('wikipedia') || combined.includes('coursera') || combined.includes('udemy') || 
                     combined.includes('education') || combined.includes('learn') || combined.includes('study') ||
                     combined.includes('教育') || combined.includes('学習') || combined.includes('勉強') ||
@@ -159,6 +284,7 @@
                     return '教育・学習';
                 }
                 
+                // ビジネス
                 if (combined.includes('business') || combined.includes('marketing') || combined.includes('startup') || 
                     combined.includes('finance') || combined.includes('investment') || combined.includes('economy') ||
                     combined.includes('ビジネス') || combined.includes('マーケティング') || combined.includes('投資') ||
@@ -166,12 +292,14 @@
                     return 'ビジネス';
                 }
                 
+                // ショッピング
                 if (combined.includes('amazon') || combined.includes('rakuten') || combined.includes('shop') || 
                     combined.includes('buy') || combined.includes('product') || combined.includes('price') ||
                     combined.includes('ショッピング') || combined.includes('買い物') || combined.includes('商品')) {
                     return 'ショッピング';
                 }
                 
+                // ブログ・記事
                 if (combined.includes('blog') || combined.includes('article') || combined.includes('note.com') || 
                     combined.includes('medium.com') || combined.includes('ブログ') || combined.includes('記事') ||
                     combined.includes('コラム')) {
@@ -181,7 +309,7 @@
                 return '未分類';
             }, []);
 
-            // LocalStorageからデータを読み込み（新機能対応）
+            // LocalStorageからデータを読み込み
             useEffect(() => {
                 try {
                     const userData = localStorage.getItem('userData');
@@ -193,8 +321,7 @@
                                 comment: item.comment || '',
                                 title: item.title || '',
                                 thumbnail: item.thumbnail || '🌐',
-                                domain: item.domain || '',
-                                aiSummary: item.aiSummary || '' // 🤖 新機能: AI要約
+                                domain: item.domain || ''
                             }));
                             setUrlItems(migratedItems.filter(item => item.url));
                             return;
@@ -215,8 +342,7 @@
                             comment: item.comment || '',
                             title: item.title || '',
                             thumbnail: item.thumbnail || '🌐',
-                            domain: item.domain || '',
-                            aiSummary: item.aiSummary || '' // 🤖 新機能: AI要約
+                            domain: item.domain || ''
                         }));
                         setUrlItems(migratedItems.filter(item => item.url));
                     }
@@ -225,7 +351,7 @@
                 }
             }, []);
 
-            // LocalStorageにデータを保存（新機能対応）
+            // LocalStorageにデータを保存
             useEffect(() => {
                 try {
                     const userId = getUserId();
@@ -233,7 +359,7 @@
                         userId: userId,
                         urlItems: urlItems,
                         lastModified: new Date().toISOString(),
-                        appVersion: '2.3' // バージョンアップ
+                        appVersion: '2.8'
                     };
                     
                     localStorage.setItem('userData', JSON.stringify(userData));
@@ -243,14 +369,14 @@
                 }
             }, [urlItems, getUserId]);
 
-            // 🎉 新機能: エクスポート機能
+            // エクスポート機能
             const exportData = useCallback(() => {
                 const userId = getUserId();
                 const exportData = {
                     userId: userId,
                     urlItems: urlItems,
                     exportDate: new Date().toISOString(),
-                    appVersion: '2.3',
+                    appVersion: '2.8',
                     totalItems: urlItems.length
                 };
                 
@@ -265,7 +391,7 @@
                 alert(`${urlItems.length}件のWebサイトをエクスポートしました！`);
             }, [urlItems, getUserId]);
 
-            // 🎉 新機能: インポート機能
+            // インポート機能
             const importData = useCallback((event) => {
                 const file = event.target.files[0];
                 if (!file) return;
@@ -284,8 +410,7 @@
                                     comment: item.comment || '',
                                     title: item.title || '',
                                     thumbnail: item.thumbnail || '🌐',
-                                    domain: item.domain || '',
-                                    aiSummary: item.aiSummary || ''
+                                    domain: item.domain || ''
                                 }));
                                 setUrlItems(migratedItems);
                                 alert('データのインポートが完了しました！');
@@ -302,7 +427,7 @@
                 event.target.value = '';
             }, []);
 
-            // 🎉 新機能: 全データクリア
+            // 全データクリア
             const clearAllData = useCallback(() => {
                 if (confirm('本当に全てのデータを削除しますか？\nこの操作は取り消せません。')) {
                     if (confirm('最終確認：全てのWebサイト情報が削除されます。よろしいですか？')) {
@@ -312,18 +437,12 @@
                 }
             }, []);
 
-            // 🤖 修正: メタデータ取得、自動分類、AI要約に対応したURL追加機能
-            const addUrlItem = useCallback(async (url, genre, priority = 0, comment = '', useAutoClassify = false, useAISummary = false) => {
+            // URL追加機能（AI分析対応）
+            const addUrlItem = useCallback(async (url, genre, priority = 0, comment = '', useAutoClassify = false) => {
                 if (url && !urlItems.some(item => item.url === url)) {
                     try {
-                        // メタデータを取得
                         const metadata = await fetchUrlMetadata(url);
-                        
-                        // 自動分類が有効な場合は、ジャンルを自動判定
                         const finalGenre = useAutoClassify ? classifyGenre(url, metadata.title) : genre;
-                        
-                        // AI要約が有効な場合は、要約を生成
-                        const aiSummary = useAISummary ? await generateAISummary(url, metadata.title) : '';
                         
                         const newItem = {
                             id: new Date().toISOString() + '_' + Math.random().toString(36).substr(2, 9),
@@ -336,8 +455,7 @@
                             createdAt: new Date().toISOString(),
                             title: metadata.title,
                             thumbnail: metadata.thumbnail,
-                            domain: metadata.domain,
-                            aiSummary: aiSummary // 🤖 新機能: AI要約
+                            domain: metadata.domain
                         };
                         setUrlItems(prevItems => [...prevItems, newItem]);
                     } catch (error) {
@@ -353,13 +471,12 @@
                             createdAt: new Date().toISOString(),
                             title: 'Webページ',
                             thumbnail: '🌐',
-                            domain: '',
-                            aiSummary: ''
+                            domain: ''
                         };
                         setUrlItems(prevItems => [...prevItems, newItem]);
                     }
                 }
-            }, [urlItems, fetchUrlMetadata, classifyGenre, generateAISummary]);
+            }, [urlItems, fetchUrlMetadata, classifyGenre]);
 
             const deleteUrlItem = useCallback((id) => {
                 setUrlItems(prevItems => prevItems.filter(item => item.id !== id));
@@ -398,29 +515,22 @@
             }, []);
 
             const moveUrlItem = useCallback((id, direction) => {
-                console.log(`Moving item ${id} ${direction}`);
-                
                 setUrlItems(prevItems => {
                     const currentIndex = prevItems.findIndex(item => item.id === id);
-                    console.log(`Current index: ${currentIndex}, Total items: ${prevItems.length}`);
                     
                     if (currentIndex === -1) {
-                        console.log('Item not found!');
                         return prevItems;
                     }
                     
                     const swapIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
-                    console.log(`Swap index: ${swapIndex}`);
 
                     if (swapIndex < 0 || swapIndex >= prevItems.length) {
-                        console.log('Cannot move - out of bounds');
                         return prevItems;
                     }
 
-                    const newItems = [...prev Items];
+                    const newItems = [...prevItems];
                     [newItems[currentIndex], newItems[swapIndex]] = [newItems[swapIndex], newItems[currentIndex]];
                     
-                    console.log('Move successful!');
                     return newItems;
                 });
             }, []);
@@ -443,8 +553,7 @@
                         item.url.toLowerCase().includes(searchQuery.toLowerCase()) ||
                         item.genre.toLowerCase().includes(searchQuery.toLowerCase()) ||
                         (item.title && item.title.toLowerCase().includes(searchQuery.toLowerCase())) ||
-                        (item.comment && item.comment.toLowerCase().includes(searchQuery.toLowerCase())) ||
-                        (item.aiSummary && item.aiSummary.toLowerCase().includes(searchQuery.toLowerCase())); // 🤖 新機能: AI要約検索
+                        (item.comment && item.comment.toLowerCase().includes(searchQuery.toLowerCase()));
                     const matchesReadStatus = readStatusFilter === 'すべて' ||
                         (readStatusFilter === '未読' && !item.isRead) ||
                         (readStatusFilter === '既読' && item.isRead);
@@ -484,18 +593,33 @@
                 <div className="min-h-screen bg-slate-100 font-sans text-slate-800">
                     <header className="bg-white shadow-md">
                         <div className="max-w-4xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
-                            <h1 className="text-3xl font-bold tracking-tight text-slate-900">
-                                読みたいものリスト 🔥
-                            </h1>
-                            <p className="mt-2 text-slate-600">気になるWebサイトをリストアップして、管理しましょう。</p>
-                            <div className="mt-2 text-sm text-blue-600 bg-blue-50 p-2 rounded flex items-center">
-                                <span className="mr-2 px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-full">v2.3</span>
-                                👤 ユーザーID: {getUserId().substr(-8)} | 🕒 最終更新: {new Date().toLocaleString('ja-JP')}
-                            </div>
-                            {/* 🤖 新機能告知 */}
-                            <div className="mt-2 text-sm text-emerald-600 bg-emerald-50 p-2 rounded flex items-center">
-                                <span className="mr-2 px-2 py-1 bg-emerald-100 text-emerald-700 text-xs rounded-full">🤖 NEW</span>
-                                ✨ AI要約機能が追加されました！URLの内容を自動で簡潔にまとめます
+                            <div className="flex justify-between items-start">
+                                <div className="flex-1">
+                                    <h1 className="text-3xl font-bold tracking-tight text-slate-900">
+                                        読みたいものリスト 🔥
+                                    </h1>
+                                    <p className="mt-2 text-slate-600">気になるWebサイトをリストアップして、管理しましょう。</p>
+                                    <div className="mt-2 text-sm text-blue-600 bg-blue-50 p-2 rounded flex items-center">
+                                        <span className="mr-2 px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-full">v2.8</span>
+                                        👤 ユーザーID: {getUserId().substr(-8)} | 🕒 最終更新: {new Date().toLocaleString('ja-JP')}
+                                    </div>
+                                    <div className="mt-2 text-sm text-purple-600 bg-purple-50 p-2 rounded flex items-center">
+                                        <span className="mr-2 px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-full">🤖 AI</span>
+                                        ✨ AI内容分析機能で120文字の説明的タイトルを自動生成！
+                                        {apiKey ? (
+                                            <span className="ml-2 px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full">設定済み</span>
+                                        ) : (
+                                            <span className="ml-2 px-2 py-1 bg-red-100 text-red-700 text-xs rounded-full">要設定</span>
+                                        )}
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => setShowSettings(true)}
+                                    className="ml-4 p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
+                                    title="設定"
+                                >
+                                    ⚙️
+                                </button>
                             </div>
                         </div>
                     </header>
@@ -503,20 +627,20 @@
                     <main className="max-w-4xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
                         <div className="bg-white p-6 rounded-xl shadow-lg mb-8">
                             <h2 className="text-xl font-semibold mb-4 text-slate-700">新しいURLを追加</h2>
-                            <UrlInput onAdd={addUrlItem} urlItems={urlItems} />
+                            <UrlInput onAdd={addUrlItem} urlItems={urlItems} apiKey={apiKey} />
                         </div>
 
                         <div className="bg-white p-6 rounded-xl shadow-lg mb-8">
                             <div className="flex items-center gap-2 mb-2">
                                 <SearchIcon className="h-5 w-5 text-slate-400" />
                                 <h2 className="text-xl font-semibold text-slate-700">検索</h2>
-                                <span className="px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full">AI要約検索対応</span>
+                                <span className="px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full">タイトル検索対応</span>
                             </div>
                             <input
                                 type="text"
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
-                                placeholder="タイトル、ジャンル、コメント、AI要約で検索..."
+                                placeholder="URL、タイトル、ジャンル、コメントで検索..."
                                 className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
                             />
                             {searchQuery && (
@@ -617,11 +741,10 @@
                             onUpdateComment={updateComment}
                         />
 
-                        {/* データ管理セクション（最下部） */}
                         <div className="bg-gradient-to-r from-green-50 to-blue-50 p-6 rounded-xl shadow-lg mt-8 border border-green-200">
                             <h2 className="text-xl font-semibold mb-4 text-slate-700 flex items-center">
                                 🛠️ データ管理
-                                <span className="ml-2 px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full">機能</span>
+                                <span className="ml-2 px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full">v2.8</span>
                             </h2>
                             <div className="flex flex-wrap gap-3 mb-4">
                                 <button
@@ -655,25 +778,92 @@
                                     💡 使い方ガイド
                                 </h3>
                                 <ul className="text-sm text-blue-700 space-y-1">
-                                    <li><strong>📤 エクスポート</strong>：現在のデータをJSONファイルとして保存できます</li>
-                                    <li><strong>📥 インポート</strong>：他のデバイスからエクスポートしたファイルを読み込めます</li>
-                                    <li><strong>🗑️ クリア</strong>：全てのデータを削除します（取り消し不可）</li>
-                                    <li><strong>👥 共有</strong>：このサイトのURLを教えるだけで、友人も個別にデータ管理可能</li>
-                                    <li><strong>💬 コメント</strong>：各URLにコメントを追加できます</li>
-                                    <li><strong>🔥 優先度</strong>：URL追加時に優先度も設定できます</li>
-                                    <li><strong>✨ プレビュー</strong>：URLのタイトルとサムネイルを自動取得します</li>
-                                    <li><strong>🤖 自動分類</strong>：URLから自動でジャンルを判定できます</li>
-                                    <li><strong>🧠 AI要約</strong>：URLの内容を120文字以内で自動要約します</li>
+                                    <li><strong>🤖 AI分析</strong>：OpenAI APIで120文字の説明的タイトルを自動生成</li>
+                                    <li><strong>📤 エクスポート</strong>：現在のデータをJSONファイルとして保存</li>
+                                    <li><strong>📥 インポート</strong>：他のデバイスからエクスポートしたファイルを読み込み</li>
+                                    <li><strong>🗑️ クリア</strong>：全てのデータを削除（取り消し不可）</li>
+                                    <li><strong>🔍 検索</strong>：タイトル、URL、ジャンル、コメントで検索可能</li>
+                                    <li><strong>⭐ 評価・優先度</strong>：5段階で評価・優先度を設定</li>
                                 </ul>
                             </div>
                         </div>
                     </main>
+
+                    {/* 設定モーダル */}
+                    {showSettings && (
+                        <SettingsModal
+                            apiKey={apiKey}
+                            onSave={saveApiKey}
+                            onClose={() => setShowSettings(false)}
+                        />
+                    )}
                 </div>
             );
         };
 
-        // 🤖 新機能対応: UrlInput コンポーネント（AI要約機能追加）
-        const UrlInput = ({ onAdd, urlItems }) => {
+        // 設定モーダルコンポーネント
+        const SettingsModal = ({ apiKey, onSave, onClose }) => {
+            const [tempApiKey, setTempApiKey] = useState(apiKey);
+
+            const handleSave = () => {
+                onSave(tempApiKey);
+                onClose();
+                alert('設定を保存しました！');
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white p-6 rounded-xl shadow-xl max-w-md w-full mx-4">
+                        <h2 className="text-xl font-semibold mb-4 text-slate-800">⚙️ 設定</h2>
+                        
+                        <div className="mb-4">
+                            <label className="block text-sm font-medium text-slate-700 mb-2">
+                                OpenAI APIキー
+                                <span className="ml-2 text-xs text-red-600">※AI分析機能に必要</span>
+                            </label>
+                            <input
+                                type="password"
+                                value={tempApiKey}
+                                onChange={(e) => setTempApiKey(e.target.value)}
+                                placeholder="sk-..."
+                                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                            />
+                            <p className="text-xs text-slate-500 mt-1">
+                                APIキーは暗号化してローカルに保存されます
+                            </p>
+                        </div>
+
+                        <div className="bg-blue-50 p-3 rounded-lg mb-4">
+                            <h3 className="text-sm font-medium text-blue-800 mb-1">🤖 AI機能について</h3>
+                            <ul className="text-xs text-blue-700 space-y-1">
+                                <li>• URLの内容を分析して120文字の説明的タイトルを生成</li>
+                                <li>• OpenAI GPT-3.5-turboを使用</li>
+                                <li>• APIキー未設定時は従来のタイトル取得方法を使用</li>
+                                <li>• データは外部に送信されず、ローカルで管理</li>
+                            </ul>
+                        </div>
+
+                        <div className="flex gap-3">
+                            <button
+                                onClick={handleSave}
+                                className="flex-1 px-4 py-2 bg-sky-600 text-white rounded-lg hover:bg-sky-700 transition-colors"
+                            >
+                                保存
+                            </button>
+                            <button
+                                onClick={onClose}
+                                className="flex-1 px-4 py-2 bg-slate-300 text-slate-700 rounded-lg hover:bg-slate-400 transition-colors"
+                            >
+                                キャンセル
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // UrlInputコンポーネント（AI分析対応）
+        const UrlInput = ({ onAdd, urlItems, apiKey }) => {
             const [url, setUrl] = useState('');
             const [genre, setGenre] = useState('未分類');
             const [customGenre, setCustomGenre] = useState('');
@@ -681,8 +871,8 @@
             const [priority, setPriority] = useState(0);
             const [comment, setComment] = useState('');
             const [useAutoClassify, setUseAutoClassify] = useState(true);
-            const [useAISummary, setUseAISummary] = useState(true); // 🤖 新機能: AI要約ON/OFF
             const [isLoading, setIsLoading] = useState(false);
+            const [loadingMessage, setLoadingMessage] = useState('');
 
             const existingGenres = useMemo(() => {
                 const genres = new Set(['未分類']);
@@ -699,8 +889,15 @@
                 if (url.trim()) {
                     setIsLoading(true);
                     try {
+                        if (apiKey) {
+                            setLoadingMessage('AI分析中...');
+                        } else {
+                            setLoadingMessage('URLを処理中...');
+                        }
+                        
                         const finalGenre = isCustomGenre && customGenre.trim() ? customGenre.trim() : genre;
-                        await onAdd(url.trim(), finalGenre, priority, comment.trim(), useAutoClassify, useAISummary);
+                        await onAdd(url.trim(), finalGenre, priority, comment.trim(), useAutoClassify);
+                        
                         setUrl('');
                         setGenre('未分類');
                         setCustomGenre('');
@@ -709,6 +906,7 @@
                         setComment('');
                     } finally {
                         setIsLoading(false);
+                        setLoadingMessage('');
                     }
                 }
             };
@@ -743,40 +941,30 @@
                         />
                     </div>
                     
-                    {/* AI機能設定 */}
-                    <div className="space-y-3 p-4 bg-gradient-to-r from-purple-50 to-emerald-50 rounded-lg border border-purple-200">
-                        <h3 className="text-sm font-medium text-slate-700 flex items-center">
-                            🤖 AI機能設定
-                            <span className="ml-2 px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-full">NEW</span>
-                        </h3>
-                        
-                        <div className="flex items-center space-x-2">
-                            <input
-                                id="auto-classify"
-                                type="checkbox"
-                                checked={useAutoClassify}
-                                onChange={(e) => setUseAutoClassify(e.target.checked)}
-                                className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-purple-300 rounded"
-                                disabled={isLoading}
-                            />
-                            <label htmlFor="auto-classify" className="text-sm text-purple-700">
-                                🏷️ 自動ジャンル分類
-                            </label>
+                    {/* AI分析機能の状態表示 */}
+                    {apiKey && (
+                        <div className="flex items-center space-x-2 p-3 bg-green-50 rounded-lg border border-green-200">
+                            <div className="text-green-600">🤖</div>
+                            <div className="text-sm text-green-700">
+                                <span className="font-medium">AI分析機能が有効です</span>
+                                <div className="text-xs">URLの内容を分析して説明的なタイトルを生成します</div>
+                            </div>
                         </div>
+                    )}
 
-                        <div className="flex items-center space-x-2">
-                            <input
-                                id="ai-summary"
-                                type="checkbox"
-                                checked={useAISummary}
-                                onChange={(e) => setUseAISummary(e.target.checked)}
-                                className="h-4 w-4 text-emerald-600 focus:ring-emerald-500 border-emerald-300 rounded"
-                                disabled={isLoading}
-                            />
-                            <label htmlFor="ai-summary" className="text-sm text-emerald-700">
-                                🧠 AI要約生成（最大120文字）
-                            </label>
-                        </div>
+                    <div className="flex items-center space-x-2 p-3 bg-purple-50 rounded-lg border border-purple-200">
+                        <input
+                            id="auto-classify"
+                            type="checkbox"
+                            checked={useAutoClassify}
+                            onChange={(e) => setUseAutoClassify(e.target.checked)}
+                            className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-purple-300 rounded"
+                            disabled={isLoading}
+                        />
+                        <label htmlFor="auto-classify" className="text-sm text-purple-700 flex items-center">
+                            🤖 自動ジャンル分類を使用
+                            <span className="ml-2 px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-full">機能</span>
+                        </label>
                     </div>
 
                     {!useAutoClassify && (
@@ -821,7 +1009,7 @@
                     <div>
                         <label htmlFor="priority-select" className="block text-sm font-medium text-slate-700 mb-2 flex items-center">
                             優先度
-                            <span className="ml-2 px-2 py-1 bg-red-100 text-red-700 text-xs rounded-full">機能</span>
+                            <span className="ml-2 px-2 py-1 bg-red-100 text-red-700 text-xs rounded-full">0-5</span>
                         </label>
                         <select
                             id="priority-select"
@@ -842,7 +1030,7 @@
                     <div>
                         <label htmlFor="comment-input" className="block text-sm font-medium text-slate-700 mb-2 flex items-center">
                             コメント・メモ
-                            <span className="ml-2 px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full">機能</span>
+                            <span className="ml-2 px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full">任意</span>
                         </label>
                         <textarea
                             id="comment-input"
@@ -870,7 +1058,7 @@
                                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                 </svg>
-                                AI分析中...
+                                {loadingMessage || '処理中...'}
                             </span>
                         ) : (
                             '追加'
@@ -880,7 +1068,7 @@
             );
         };
 
-        // GenreFilter コンポーネント
+        // GenreFilterコンポーネント
         const GenreFilter = ({ genres, selectedGenre, onFilterChange }) => {
             return (
                 <div>
@@ -901,7 +1089,7 @@
             );
         };
 
-        // ReadStatusFilter コンポーネント
+        // ReadStatusFilterコンポーネント
         const ReadStatusFilter = ({ selectedStatus, onFilterChange }) => {
             return (
                 <div>
@@ -922,7 +1110,7 @@
             );
         };
 
-        // SortButton コンポーネント
+        // SortButtonコンポーネント
         const SortButton = ({ sortBy, currentSort, sortDirection, onClick, label }) => {
             const isActive = currentSort === sortBy;
             const showArrow = isActive;
@@ -946,7 +1134,7 @@
             );
         };
 
-        // UrlList コンポーネント
+        // UrlListコンポーネント
         const UrlList = ({ items, allItems, onDelete, onToggleRead, onSetRating, onSetPriority, onMove, onUpdateComment }) => {
             if (items.length === 0) {
                 return (
@@ -970,7 +1158,7 @@
             }
 
             return (
-                <div className="space-y-4">
+                <div className="space-y-3">
                     {items.map((item) => (
                         <UrlItem
                             key={item.id}
@@ -988,7 +1176,7 @@
             );
         };
 
-        // 🤖 修正: UrlItem コンポーネント（AI要約表示とタイトル優先表示対応）
+        // UrlItemコンポーネント（コンパクト版）
         const UrlItem = ({ item, allItems, onDelete, onToggleRead, onSetRating, onSetPriority, onMove, onUpdateComment }) => {
             const [isEditingComment, setIsEditingComment] = useState(false);
             const [commentText, setCommentText] = useState(item.comment || '');
@@ -1000,15 +1188,14 @@
             const formatDate = (dateString) => {
                 try {
                     const date = new Date(dateString);
-                    return date.toLocaleString('ja-JP', {
-                        year: 'numeric',
+                    return date.toLocaleDateString('ja-JP', {
                         month: 'short',
                         day: 'numeric',
                         hour: '2-digit',
                         minute: '2-digit'
                     });
                 } catch {
-                    return '日時不明';
+                    return '不明';
                 }
             };
 
@@ -1022,185 +1209,154 @@
                 setIsEditingComment(false);
             };
 
-            const handleMoveUp = () => {
-                console.log('Move up clicked for item:', item.id);
-                onMove(item.id, 'up');
-            };
-
-            const handleMoveDown = () => {
-                console.log('Move down clicked for item:', item.id);
-                onMove(item.id, 'down');
-            };
-
             return (
-                <div className={`bg-white rounded-xl shadow-lg p-6 border-l-4 ${item.isRead ? 'border-green-500 bg-green-50' : 'border-sky-500'}`}>
+                <div className={`bg-white rounded-lg shadow-md p-4 border-l-4 ${item.isRead ? 'border-green-500 bg-green-50' : 'border-sky-500'}`}>
                     <div className="flex justify-between items-start">
                         <div className="flex-1 min-w-0">
-                            <div className="flex items-start gap-3 mb-3">
-                                <div className="text-2xl">{item.thumbnail || '🌐'}</div>
+                            {/* タイトル行とジャンル・読み取り状況 */}
+                            <div className="flex items-start gap-3 mb-2">
+                                <div className="text-xl">{item.thumbnail || '🌐'}</div>
                                 <div className="flex-1">
-                                    <div className="flex items-center gap-2 mb-2">
-                                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-800">
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-800">
                                             {item.genre}
                                         </span>
                                         {item.isRead && (
-                                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
                                                 既読
                                             </span>
                                         )}
                                         {item.priority > 0 && (
-                                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
                                                 優先度 {item.priority}
                                             </span>
                                         )}
                                     </div>
-                                    
-                                    {/* 🔧 修正: タイトルを優先表示、URLは小さく */}
-                                    {item.title && (
-                                        <h3 className="text-lg font-semibold text-slate-900 mb-2 leading-tight">
-                                            <a
-                                                href={item.url}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="text-slate-900 hover:text-sky-600 transition-colors"
-                                            >
-                                                {item.title}
-                                            </a>
-                                        </h3>
-                                    )}
-                                    
-                                    {item.domain && (
-                                        <p className="text-sm text-slate-500 mb-2">📍 {item.domain}</p>
-                                    )}
-                                    
-                                    {/* URLは小さく表示 */}
+                                    {/* クリック可能なタイトル */}
                                     <a
                                         href={item.url}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className="text-xs text-sky-600 hover:text-sky-800 break-all block mb-3"
+                                        className="text-lg font-medium text-blue-600 hover:text-blue-800 hover:underline block mb-1 line-clamp-2"
                                     >
-                                        🔗 {item.url}
+                                        {item.title || item.url}
                                     </a>
+                                    {/* ドメイン表示 */}
+                                    {item.domain && (
+                                        <p className="text-sm text-slate-500 mb-2">📍 {item.domain}</p>
+                                    )}
                                 </div>
                             </div>
                             
-                            {/* 🤖 新機能: AI要約表示 */}
-                            {item.aiSummary && (
-                                <div className="mb-3 p-3 bg-gradient-to-r from-emerald-50 to-blue-50 rounded-lg border border-emerald-200">
-                                    <div className="flex items-center mb-2">
-                                        <span className="text-sm font-medium text-emerald-700 flex items-center">
-                                            🧠 AI要約
-                                            <span className="ml-2 px-2 py-1 bg-emerald-100 text-emerald-700 text-xs rounded-full">NEW</span>
-                                        </span>
+                            {/* 優先度・評価・追加日時を1行に配置 */}
+                            <div className="flex items-center gap-4 mb-3 text-sm">
+                                <div className="flex items-center gap-1">
+                                    <span className="text-slate-600">優先度:</span>
+                                    <StarRating 
+                                        rating={item.priority} 
+                                        onRate={(priority) => onSetPriority(item.id, priority)}
+                                        color="red"
+                                        size="small"
+                                    />
+                                </div>
+                                <div className="flex items-center gap-1">
+                                    <span className="text-slate-600">評価:</span>
+                                    <StarRating 
+                                        rating={item.rating} 
+                                        onRate={(rating) => onSetRating(item.id, rating)}
+                                        color="yellow"
+                                        size="small"
+                                    />
+                                </div>
+                                <div className="flex items-center gap-1 text-slate-500">
+                                    <CalendarIcon className="h-3 w-3" />
+                                    <span>{formatDate(item.createdAt)}</span>
+                                </div>
+                            </div>
+                            
+                            {/* コメント表示・編集（コンパクト版） */}
+                            {(item.comment || isEditingComment) && (
+                                <div className="mt-2 p-2 bg-slate-50 rounded border">
+                                    <div className="flex items-center justify-between mb-1">
+                                        <span className="text-xs font-medium text-slate-600">💬 コメント</span>
+                                        <button
+                                            onClick={() => setIsEditingComment(!isEditingComment)}
+                                            className="text-xs text-sky-600 hover:text-sky-800"
+                                        >
+                                            {isEditingComment ? 'キャンセル' : '編集'}
+                                        </button>
                                     </div>
-                                    <p className="text-sm text-slate-700 leading-relaxed">{item.aiSummary}</p>
+                                    {isEditingComment ? (
+                                        <div className="space-y-1">
+                                            <textarea
+                                                value={commentText}
+                                                onChange={(e) => setCommentText(e.target.value)}
+                                                placeholder="コメントを入力してください..."
+                                                rows="2"
+                                                className="w-full px-2 py-1 border border-slate-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500 resize-vertical"
+                                            />
+                                            <div className="flex gap-1">
+                                                <button
+                                                    onClick={handleCommentSave}
+                                                    className="px-2 py-1 bg-sky-600 text-white rounded text-xs hover:bg-sky-700"
+                                                >
+                                                    保存
+                                                </button>
+                                                <button
+                                                    onClick={handleCommentCancel}
+                                                    className="px-2 py-1 bg-slate-300 text-slate-700 rounded text-xs hover:bg-slate-400"
+                                                >
+                                                    キャンセル
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="text-sm text-slate-600">
+                                            {item.comment ? (
+                                                <div className="whitespace-pre-wrap break-words">{item.comment}</div>
+                                            ) : (
+                                                <span className="text-slate-400 italic">コメントがありません</span>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                             )}
-                            
-                            {/* コメント表示・編集 */}
-                            <div className="mt-3 p-3 bg-slate-50 rounded-lg border">
-                                <div className="flex items-center justify-between mb-2">
-                                    <span className="text-sm font-medium text-slate-700 flex items-center">
-                                        💬 コメント
-                                        <span className="ml-2 px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full">機能</span>
-                                    </span>
-                                    <button
-                                        onClick={() => setIsEditingComment(!isEditingComment)}
-                                        className="text-xs text-sky-600 hover:text-sky-800"
-                                    >
-                                        {isEditingComment ? 'キャンセル' : '編集'}
-                                    </button>
-                                </div>
-                                {isEditingComment ? (
-                                    <div className="space-y-2">
-                                        <textarea
-                                            value={commentText}
-                                            onChange={(e) => setCommentText(e.target.value)}
-                                            placeholder="コメントを入力してください..."
-                                            rows="3"
-                                            className="w-full px-3 py-2 border border-slate-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 resize-vertical"
-                                        />
-                                        <div className="flex gap-2">
-                                            <button
-                                                onClick={handleCommentSave}
-                                                className="px-3 py-1 bg-sky-600 text-white rounded text-xs hover:bg-sky-700"
-                                            >
-                                                保存
-                                            </button>
-                                            <button
-                                                onClick={handleCommentCancel}
-                                                className="px-3 py-1 bg-slate-300 text-slate-700 rounded text-xs hover:bg-slate-400"
-                                            >
-                                                キャンセル
-                                            </button>
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="text-sm text-slate-600">
-                                        {item.comment ? (
-                                            <div className="whitespace-pre-wrap break-words">{item.comment}</div>
-                                        ) : (
-                                            <span className="text-slate-400 italic">コメントがありません</span>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-
-                            <div className="flex items-center mt-2">
-                                <span className="text-sm text-slate-500 mr-2">優先度:</span>
-                                <StarRating 
-                                    rating={item.priority} 
-                                    onRate={(priority) => onSetPriority(item.id, priority)}
-                                    color="red"
-                                />
-                            </div>
-                            <div className="flex items-center mt-2">
-                                <span className="text-sm text-slate-500 mr-2">評価:</span>
-                                <StarRating 
-                                    rating={item.rating} 
-                                    onRate={(rating) => onSetRating(item.id, rating)}
-                                    color="yellow"
-                                />
-                            </div>
-                            <div className="flex items-center mt-2 text-xs text-slate-400">
-                                <CalendarIcon className="h-3 w-3 mr-1" />
-                                <span>追加日時: {formatDate(item.createdAt)}</span>
-                            </div>
                         </div>
-                        <div className="flex flex-col gap-2 ml-4">
+                        
+                        {/* 右側のボタン群 */}
+                        <div className="flex flex-col gap-1 ml-4">
                             <div className="flex flex-col gap-1">
                                 {canMoveUp ? (
                                     <button
-                                        onClick={handleMoveUp}
-                                        className="p-2 text-white bg-blue-500 hover:bg-blue-600 rounded shadow-sm transition-all duration-200"
+                                        onClick={() => onMove(item.id, 'up')}
+                                        className="p-1 text-white bg-blue-500 hover:bg-blue-600 rounded shadow-sm transition-all duration-200"
                                         title="上に移動"
                                     >
-                                        <ArrowUpIcon className="h-4 w-4" />
+                                        <ArrowUpIcon className="h-3 w-3" />
                                     </button>
                                 ) : (
-                                    <div className="p-2 text-slate-300 bg-slate-100 rounded">
-                                        <ArrowUpIcon className="h-4 w-4" />
+                                    <div className="p-1 text-slate-300 bg-slate-100 rounded">
+                                        <ArrowUpIcon className="h-3 w-3" />
                                     </div>
                                 )}
                                 {canMoveDown ? (
                                     <button
-                                        onClick={handleMoveDown}
-                                        className="p-2 text-white bg-blue-500 hover:bg-blue-600 rounded shadow-sm transition-all duration-200"
+                                        onClick={() => onMove(item.id, 'down')}
+                                        className="p-1 text-white bg-blue-500 hover:bg-blue-600 rounded shadow-sm transition-all duration-200"
                                         title="下に移動"
                                     >
-                                        <ArrowDownIcon className="h-4 w-4" />
+                                        <ArrowDownIcon className="h-3 w-3" />
                                     </button>
                                 ) : (
-                                    <div className="p-2 text-slate-300 bg-slate-100 rounded">
-                                        <ArrowDownIcon className="h-4 w-4" />
+                                    <div className="p-1 text-slate-300 bg-slate-100 rounded">
+                                        <ArrowDownIcon className="h-3 w-3" />
                                     </div>
                                 )}
                             </div>
-                            <div className="flex gap-1 mt-2">
+                            <div className="flex flex-col gap-1 mt-1">
                                 <button
                                     onClick={() => onToggleRead(item.id)}
-                                    className={`px-3 py-1 rounded text-xs font-medium ${
+                                    className={`px-2 py-1 rounded text-xs font-medium ${
                                         item.isRead
                                             ? 'bg-slate-200 text-slate-700 hover:bg-slate-300'
                                             : 'bg-green-600 text-white hover:bg-green-700'
@@ -1210,7 +1366,7 @@
                                 </button>
                                 <button
                                     onClick={() => onDelete(item.id)}
-                                    className="px-3 py-1 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700"
+                                    className="px-2 py-1 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700"
                                 >
                                     削除
                                 </button>
@@ -1221,8 +1377,8 @@
             );
         };
 
-        // StarRating コンポーネント
-        const StarRating = ({ rating, onRate, color = 'yellow' }) => {
+        // StarRatingコンポーネント（サイズ対応）
+        const StarRating = ({ rating, onRate, color = 'yellow', size = 'normal' }) => {
             const colorClasses = {
                 yellow: {
                     active: 'text-yellow-400',
@@ -1236,15 +1392,21 @@
                 }
             };
 
+            const sizeClasses = {
+                normal: 'text-lg',
+                small: 'text-sm'
+            };
+
             const colors = colorClasses[color];
+            const sizeClass = sizeClasses[size];
 
             return (
-                <div className="flex gap-1">
+                <div className="flex gap-0.5">
                     {[1, 2, 3, 4, 5].map((star) => (
                         <button
                             key={star}
                             onClick={() => onRate(star)}
-                            className={`text-lg ${
+                            className={`${sizeClass} ${
                                 star <= rating ? colors.active : colors.inactive
                             } ${colors.hover} transition-colors`}
                         >
