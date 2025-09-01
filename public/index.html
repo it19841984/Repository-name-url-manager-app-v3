@@ -437,7 +437,7 @@
                 }
             }, []);
 
-            // 🔥 修正: URL追加機能（リストの先頭に追加）
+            // URL追加機能（AI分析対応）
             const addUrlItem = useCallback(async (url, genre, priority = 0, comment = '', useAutoClassify = false) => {
                 if (url && !urlItems.some(item => item.url === url)) {
                     try {
@@ -457,8 +457,7 @@
                             thumbnail: metadata.thumbnail,
                             domain: metadata.domain
                         };
-                        // 🔥 修正: 配列の先頭に追加
-                        setUrlItems(prevItems => [newItem, ...prevItems]);
+                        setUrlItems(prevItems => [...prevItems, newItem]);
                     } catch (error) {
                         console.error('URLメタデータの取得に失敗:', error);
                         const newItem = {
@@ -474,8 +473,7 @@
                             thumbnail: '🌐',
                             domain: ''
                         };
-                        // 🔥 修正: 配列の先頭に追加
-                        setUrlItems(prevItems => [newItem, ...prevItems]);
+                        setUrlItems(prevItems => [...prevItems, newItem]);
                     }
                 }
             }, [urlItems, fetchUrlMetadata, classifyGenre]);
@@ -783,7 +781,7 @@
                                     <li><strong>🤖 AI分析</strong>：OpenAI APIで120文字の説明的タイトルを自動生成</li>
                                     <li><strong>📤 エクスポート</strong>：現在のデータをJSONファイルとして保存</li>
                                     <li><strong>📥 インポート</strong>：他のデバイスからエクスポートしたファイルを読み込み</li>
-                                    <li><strong>🗑️ クリア</stronger>：全てのデータを削除（取り消し不可）</li>
+                                    <li><strong>🗑️ クリア</strong>：全てのデータを削除（取り消し不可）</li>
                                     <li><strong>🔍 検索</strong>：タイトル、URL、ジャンル、コメントで検索可能</li>
                                     <li><strong>⭐ 評価・優先度</strong>：5段階で評価・優先度を設定</li>
                                 </ul>
